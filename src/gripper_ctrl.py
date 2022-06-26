@@ -6,9 +6,8 @@ import minimalmodbus as mm
 import time
 import binascii, sys, rospy
 from robotiq_gripper.msg import change_state
+from robotiq_gripper.msg import grip_state
 import gripper_publish
-import os
-
 #Communication setup
 mm.BAUDRATE=115200
 mm.BYTESIZE=8
@@ -16,24 +15,16 @@ mm.PARITY="N"
 mm.STOPBITS=1
 mm.TIMEOUT=0.05    
 
-rospy.init_node('robotiq_gripper', anonymous=True)
 
 def sys_command(input_word='exit', sys_exit=True):
     while True:
         end_or_not = input("Do you want to {} (y/n)? ".format(input_word))
-        if end_or_not.lower() == 'y' and sys_exit:
+        if end_or_not.lower() == 'y':
+            return True
+        elif end_or_not.lower() == 'n' and sys_exit:
             sys.exit()
         elif end_or_not.lower():
-            return True
-        elif end_or_not.lower() == 'n':
             return False
-
-# publish gripper states to Linux cmd to move gripper to certain position
-def pub_command(robot_name, position, speed=255, force=100, justGrap="False"):
-    cmd = 'rostopic pub /moveGripper robotiq_gripper/change_state ' + str(robot_name) + ' ' + str(position) + ' ' + str(speed) + ' ' + str(force) + ' ' + justGrap
-    print(cmd)
-    # os.system(cmd)
-    os.system("gnome-terminal -e 'bash -c \""+cmd+";bash\"'")
 
 class RobotiqGripper( mm.Instrument ):
     """"Instrument class for Robotiq grippers (2F85, 2F140, hande,...). 
@@ -245,7 +236,7 @@ class RobotiqGripper( mm.Instrument ):
         gripperStatusReg0="0"*(16-len(gripperStatusReg0))+gripperStatusReg0
         gripperStatusReg0=gripperStatusReg0[:8]
         #########################################
-        print(gripperStatusReg0)
+        #print(gripperStatusReg0)
         self.paramDic["gOBJ"]=gripperStatusReg0[0:2]
         #Object detection
         self.paramDic["gSTA"]=gripperStatusReg0[2:4]
@@ -500,7 +491,6 @@ class RobotiqGripper( mm.Instrument ):
         """
         
         registers=self.read_registers(2002,1)
-        print('##########################################################3')
         print(registers)
         register=self._intToHex(registers[0])
         position=int(register[:2],16)
@@ -567,7 +557,7 @@ class gripperControl(RobotiqGripper):
         self.portname = port_name
         super().__init__(port_name, slaveaddress)
         print("Please check that there is nothing in the gripper's clasp")
-        sys_command("continue", sys_exit=False)
+        sys_command("continue", sys_exit=True)
         self.resetActivate()
         self.reset()
         self.printInfo()
@@ -600,12 +590,13 @@ class gripperControl(RobotiqGripper):
 
         self.goTo(position, force, speed)
         self.position= self.getPositionCurrent()[0]
-        #print("{} gripper moving to position: {}, force: {}, speed: {}".format(self.attached_to_robot,position, force, speed))
+        print("{} gripper moving to position: {}, force: {}, speed: {}".format(self.attached_to_robot,position, force, speed))
     
     #Only cares to grasp object at correct distance 
     def justGrasp(self):
         position=255
-        self.goTo(position, self.speed, self.force)
+        initial_force = 0
+        self.goTo(position, self.speed, initial_force)
         self.position = self.getPositionCurrent()[0]
         time.sleep(1)
         self.position+=5
@@ -614,83 +605,51 @@ class gripperControl(RobotiqGripper):
     def __str__(self) -> str:
         return "ROS integrated Robotiq gripper package"
     
-# while True:
-#     gripper_to_robot = input("Which robot are you using: ").lower()
-#     if gripper_to_robot in robot_comms:
-#         com_port = robot_comms[gripper_to_robot]
-#         break
-#     else:
-#         print("Robot not found")
-#         sys_command()
 #COMs ports to connect gripper to respective robot
 robot_comms = {
-    # bkuka still needs test
-    # 'bkuka': gripperControl('bkuka', "/dev/ttyUSB3"),
-    'gkuka': gripperControl('gkuka', "/dev/ttyUSB6"),
+    #'bkuka': gripperControl('bkuka', "/dev/ttyUSB1"),
+    'gkuka': gripperControl('gkuka', "/dev/ttyUSB2"),
     # 's5': gripperControl('s5', "/dev/ttyUSB2")
 }
 
-def listener(grip_instance):
-    if grip_instance:
-        def callback(data):
-            print(data)
-            robot_name = data.robot_name
-            grip = robot_comms[robot_name]
-            position= data.position_state
-            force = data.force_state
-            speed = data.speed_state
-            justGrasp = data.justGrasp
+def callback(data):
+    
+    robot_name = data.robot_name
+    grip = robot_comms[robot_name]
+    position= data.position_state
+    force = data.force_state
+    speed = data.speed_state
+    fullGrasp = data.justGrasp
 
-            if grip.position != position:
-                if justGrasp:
-                    grip.justGrasp()
-                    position = grip.position
-                else:
-                    grip.movePos(position, force, speed)
-        rospy.Subscriber("moveGripper", change_state, callback)       
-        rospy.Rate(1000).sleep()
+    if fullGrasp:
+        grip.justGrasp()
+    else:
+        grip.movePos(position, force, speed)
+
+def listener():
+    rospy.Subscriber("moveGripper", change_state, callback) 
+         
+
 if __name__ =="__main__":
-    r=rospy.Rate(10)
-    while not rospy.is_shutdown():
+    #Initialize node
+    rospy.init_node('robotiq_gripper', anonymous=True)
+
+    #Set rate for publishing
+    r=rospy.Rate(1)
+
+    #Listens for commands on Topic: moveGripper
+    listener()
+
+    #Initializes Publisher to Topic: gripper_state
+    pub = rospy.Publisher("gripper_state", grip_state, queue_size=1)
+
+    #Generates constant publishing of messages
+    while True:        
         for i in robot_comms:
-            gripper = robot_comms[i]
-            gripper_publish.updateGripperState(gripper.attached_to_robot, gripper.position, gripper.speed, gripper.force, gripper.graspObject)
-            input('Press Enter to Execute\n')
-            pub_command(i, 0)
-            input('Press Enter to Execute\n')
-            pub_command(i, 220)
-            listener(gripper)
-            r.sleep()
-        ## 
-        rospy.spin()
-        # for i in robot_comms:
-        #     print(i)
-        #     gripper = robot_comms[i]
-        #     gripper_publish.updateGripperState(gripper.attached_to_robot, gripper.position, gripper.speed, gripper.force, gripper.graspObject)
+            gripper = robot_comms[i]       
+            gripper_publish.updateGripperState(gripper.attached_to_robot, gripper.position, gripper.speed, gripper.force, gripper.graspObject, pub)
+        #waits    
+        r.sleep()
 
-        #     input('Press Enter to Execute')
-        #     pub_command(i, 200)
-
-#Test
-# if True:
-#     grip=RobotiqGripper("COM9")
-#     grip.resetActivate()
-#     grip.reset()
+    rospy.spin()
     
-#     grip.printInfo()
-#     grip.activate()
-    
-#     grip.printInfo()
-#     time.sleep(2)
-#     grip.goTo(20)
-    
-#     while True:
-#         get_pos = input("Give me a position: ")
-#         grip.goTo(int(get_pos))
-    # grip.goTo(230)
-    # grip.goTo(40)
-    # grip.goTo(80)
-    
-    # grip.calibrate(0,40)
-    # grip.goTomm(20,255,255)
-    # grip.goTomm(40,1,255)
