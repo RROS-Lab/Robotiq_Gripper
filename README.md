@@ -15,7 +15,12 @@ _Allows for multiple grippers to be controlled (requires gripper to be attached 
 * grip_state: Shows the grip state of each gripper (along with which robot it is attached to)
 
 ## Moving the gripper
-`rostopic pub /moveGripper robotiq_gripper/change_state robot_name position speed force justGrap`
+`rostopic pub /moveGripper Robotiq_Gripper/change_state robot_name position speed force justGrap`
+If justGrasp is set to True, the gripper will just go to a position that ideally grips the object.
+
+## Reading gripper state
+`rostopic echo /grip_state`
+Returns gripper_name (also known as robot_name), position_state, force_state, speed_state, activated (True if object is in gripper's grasp)
 
 ## Adding more grippers
 Add to this dictionary
