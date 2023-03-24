@@ -3,6 +3,7 @@
 import binascii, sys, rospy
 from robotiq_gripper.msg import change_state
 from robotiq_gripper.msg import grip_state
+from gripper_lib import *
 import gripper_publish
 #Communication setup
 mm.BAUDRATE=115200
@@ -39,7 +40,6 @@ class gripperControl(RobotiqGripper):
         self.goal_position = 0
         self.position = 0
         self.speed = 100
-        self.graspObject=False
         self.goTo(self.position, self.speed, self.force)
 
     def setSpeed(self, speed):
@@ -68,9 +68,14 @@ class gripperControl(RobotiqGripper):
         position=255
         initial_force = 0
         self.goTo(position, self.speed, initial_force)
-        self.position = self.getPositionCurrent()[0]
+        if self.objectDetected():
+            position = self.getPositionCurrent()[0]
+        else:
+            position = 255
         time.sleep(1)
-        self.position+=5
+        print("Current Position: ", position)
+        position+=5
+        self.position = position
         self.goTo(self.position,self.speed, self.force)
 
     def __str__(self) -> str:
@@ -79,7 +84,7 @@ class gripperControl(RobotiqGripper):
 #COMs ports to connect gripper to respective robot
 robot_comms = {
     #'bkuka': gripperControl('bkuka', "/dev/ttyUSB1"),
-    'gkuka': gripperControl('gkuka', "/dev/ttyUSB2"),
+    'gkuka': gripperControl('gkuka', "/dev/ttyUSB1"),
     # 's5': gripperControl('s5', "/dev/ttyUSB2")
 }
 
@@ -91,7 +96,6 @@ def callback(data):
     force = data.force_state
     speed = data.speed_state
     fullGrasp = data.justGrasp
-
     if fullGrasp:
         grip.justGrasp()
     else:
@@ -123,4 +127,3 @@ if __name__ =="__main__":
         r.sleep()
 
     rospy.spin()
-    
