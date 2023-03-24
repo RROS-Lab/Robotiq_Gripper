@@ -48,6 +48,7 @@ robot_comms = {
 ├── README.md  
 ├── src  
 │   ├── gripper_ctrl.py
+|   ├── gripper_lib.py 
 │   ├── gripper_publish.py  
 └────── minimalmodbus.py 
 ```
